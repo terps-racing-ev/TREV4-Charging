@@ -1,19 +1,20 @@
 # notes for HVC:
 ## send voltage and current limits as integers scaled by 10
-## send status message with status codes in last byte, voltage and current limits in bytes 1-4
-## will receive message from charger with status codes in last byte
+## send status message with status codes in byte 7, voltage limit in bytes 0-1, and current limit in bytes 2-3
+## will receive message from laptop with status codes in last byte
 
 # TODO: CAN error handling
 
 import can
 import time
+import struct
 from typing import Optional
 from enum import Enum
 from datetime import datetime
 from threading import Event
 
-MAX_VOLTAGE_LIMIT = 450
-MAX_CURRENT_LIMIT = 20
+MAX_VOLTAGE_LIMIT = 453.6
+MAX_CURRENT_LIMIT = 14
 
 HVC_BAUD_RATE = 500000
 CHG_BAUD_RATE = 250000
@@ -30,7 +31,7 @@ CAN_ID_HVC_STATUS = 0x00000000 # PLACEHOLDER
 CAN_ID_CHG_STATUS = 0x18FF50E5 # from charger datasheet
 
 # filter for HVC status message
-HVC_FILTER = [{"can_id": CAN_ID_HVC_STATUS, "can_mask": 0x1FFFFFFF, "extended": True}]
+HVC_FILTER = [{"can_id": CAN_ID_HVC_STATUS, "can_mask": 0xFFFFFFFF, "extended": True}]
 
 # interval in seconds that messages must be sent to the charger
 CHG_CMD_PERIOD = 1
@@ -164,8 +165,8 @@ class ChargingController:
     
     def _set_chg_limits(self):
         """Set the voltage and current limits in charger command message."""
-        hvc_voltage_limit = (self.hvc_status_msg.data[0] << 8 & self.hvc_status_msg.data[1]) / 10 # scaled by 10
-        hvc_current_limit = (self.hvc_status_msg.data[2] << 8 & self.hvc_status_msg.data[3]) / 10
+        hvc_voltage_limit = struct.unpack('<H', self.hvc_status_msg.data[0:2])[0] / 10.0 # scaled by 10
+        hvc_current_limit = struct.unpack('<H', self.hvc_status_msg.data[2:4])[0] / 10.0
 
         # set voltage and current limits to the lower of HVC and user limits
         self.voltage_limit = hvc_voltage_limit if hvc_voltage_limit <= self.voltage_limit else self.voltage_limit
