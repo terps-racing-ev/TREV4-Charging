@@ -3,6 +3,7 @@
 ## send status message with status codes in byte 7, voltage limit in bytes 0-1, and current limit in bytes 2-3
 ## will receive message from laptop with status codes in last byte
 
+# TODO: Update current limit reguarly
 # TODO: CAN error handling
 
 import can
@@ -19,8 +20,8 @@ MAX_CURRENT_LIMIT = 14
 HVC_BAUD_RATE = 500000
 CHG_BAUD_RATE = 250000
 
-DEFAULT_HVC_CHANNEL = "PCAN_USBBUS1"
-DEFAULT_CHG_CHANNEL = "PCAN_USBBUS2"
+# DEFAULT_HVC_CHANNEL = "PCAN_USBBUS1"
+# DEFAULT_CHG_CHANNEL = "PCAN_USBBUS2"
 
 # TX CAN IDs
 CAN_ID_HEARTBEAT = 0x00000000 # PLACEHOLDER
@@ -77,8 +78,8 @@ class ChargingController:
         self.status = "IDLE"
         self.messages = ""
 
-        self.hvc_channel = DEFAULT_HVC_CHANNEL
-        self.chg_channel = DEFAULT_CHG_CHANNEL
+        # self.hvc_channel = DEFAULT_HVC_CHANNEL
+        # self.chg_channel = DEFAULT_CHG_CHANNEL
 
         self.hvc_bus: Optional[can.Bus] = None
         self.chg_bus: Optional[can.Bus] = None
@@ -104,22 +105,15 @@ class ChargingController:
         self.last_rx_timestamp = 0.0
         self.last_tx_timestamp = 0.0
 
-    def _can_bus_init(self):
-        """Start CAN buses and FIFO buffers."""
-        # instantiate CAN buses
-        self.hvc_bus = can.interface.Bus(interface='pcan', channel=self.hvc_channel, bitrate=HVC_BAUD_RATE, can_filters=HVC_FILTER)
-        self.chg_bus = can.interface.Bus(interface='pcan', channel=self.chg_channel, bitrate=CHG_BAUD_RATE)
-        self._log("CAN buses started")
-
+    def _can_init(self):
+        """Set up RX FIFOs and TX messages to HVC and charger."""
         # instantiate FIFO buffers for RX messages
         self.hvc_rx_fifo = can.BufferedReader()
         self.hvc_notifier = can.Notifier(self.hvc_bus, [self.hvc_rx_fifo])
         self.chg_rx_fifo = can.BufferedReader()
         self.chg_notifier = can.Notifier(self.chg_bus, [self.chg_rx_fifo])
         self._log("RX FIFO buffers started")
-
-    def _can_message_init(self):
-        """Set up CAN messages to HVC and charger."""
+        
         # start heartbeat message to HVC
         self.heartbeat_msg = can.Message(arbitration_id=CAN_ID_HEARTBEAT, data=[0, 0, 0, 0, 0, 0, 0, 0], is_extended_id=True)
         self.heartbeat_tx = self.hvc_bus.send_periodic(self.heartbeat_msg, 1) # period of 1s
@@ -226,6 +220,45 @@ class ChargingController:
         formatted_time = time.strftime("%H:%M:%S")
         self.messages = f"{msg} ({formatted_time})"
     
+    def start_chg_can(self, channel: str) -> bool:
+        """
+        Start charger CAN bus.
+        
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            self.chg_bus = can.interface.Bus(interface='pcan', channel=channel, bitrate=CHG_BAUD_RATE)
+            return True
+        except Exception:
+            return False
+
+    def start_hvc_can(self, channel: str) -> bool:
+        """Start HVC CAN bus.
+        
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            self.hvc_bus = can.interface.Bus(interface='pcan', channel=channel, bitrate=HVC_BAUD_RATE, can_filters=HVC_FILTER)
+            return True
+        except Exception:
+            return False
+        
+    def stop_chg_can(self) -> bool:
+        try:
+            self.chg_bus.shutdown()
+            return True
+        except Exception:
+            return False
+
+    def stop_hvc_can(self) -> bool:
+        try:
+            self.hvc_bus.shutdown()
+            return True
+        except Exception:
+            return False
+
     def record_user_chg_limits(self, voltage_limit: Optional[float], current_limit: Optional[float]):
         """Save user-input voltage and current limits."""
         if voltage_limit is not None:
@@ -237,8 +270,7 @@ class ChargingController:
         """State machine for charging control."""
         self.status = "INITIALIZING"
         
-        self._can_bus_init()
-        self._can_message_init()
+        self._can_init()
     
         self.state = State.IDLE
 
