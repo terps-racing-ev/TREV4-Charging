@@ -3,7 +3,6 @@
 ## send status message with status codes in byte 7, voltage limit in bytes 0-1, and current limit in bytes 2-3
 ## will receive message from laptop with status codes in last byte
 
-# TODO: Update current limit reguarly
 # TODO: CAN error handling
 
 import can
@@ -19,9 +18,6 @@ MAX_CURRENT_LIMIT = 14
 
 HVC_BAUD_RATE = 500000
 CHG_BAUD_RATE = 250000
-
-# DEFAULT_HVC_CHANNEL = "PCAN_USBBUS1"
-# DEFAULT_CHG_CHANNEL = "PCAN_USBBUS2"
 
 # TX CAN IDs
 CAN_ID_HEARTBEAT = 0x00000000 # PLACEHOLDER
@@ -78,9 +74,6 @@ class ChargingController:
         self.status = "IDLE"
         self.messages = ""
 
-        # self.hvc_channel = DEFAULT_HVC_CHANNEL
-        # self.chg_channel = DEFAULT_CHG_CHANNEL
-
         self.hvc_bus: Optional[can.Bus] = None
         self.chg_bus: Optional[can.Bus] = None
         
@@ -129,13 +122,8 @@ class ChargingController:
     
     def _update_chg_ctrl(self, chg_ctrl: Chg_Ctrl):
         """Set control to charging or not charging in charger command message."""
-        if isinstance(self.chg_tx, can.ModifiableCyclicTaskABC):
-            self.chg_cmd_msg.data[4] = chg_ctrl.value
-            self.chg_tx.modify_data(self.chg_cmd_msg)
-        else:
-            self.chg_tx.stop()
-            self.chg_cmd_msg.data[4] = chg_ctrl.value
-            self.chg_tx = self.chg_bus.send_periodic(self.chg_cmd_msg, CHG_CMD_PERIOD)
+        self.chg_cmd_msg.data[4] = chg_ctrl.value
+        self.chg_tx.modify_data(self.chg_cmd_msg) # pcan supports modifiable messages
         
         self.last_tx_timestamp = time.time()
 
@@ -162,26 +150,18 @@ class ChargingController:
         hvc_voltage_limit = struct.unpack('<H', self.hvc_status_msg.data[0:2])[0] / 10.0 # scaled by 10
         hvc_current_limit = struct.unpack('<H', self.hvc_status_msg.data[2:4])[0] / 10.0
 
-        # set voltage and current limits to the lower of HVC and user limits
-        self.voltage_limit = hvc_voltage_limit if hvc_voltage_limit <= self.voltage_limit else self.voltage_limit
-        self.current_limit = hvc_current_limit if hvc_current_limit <= self.current_limit else self.current_limit
+        # set voltage and current limits to the lower of HVC and user/max limits
+        voltage_limit = hvc_voltage_limit if hvc_voltage_limit <= self.voltage_limit else self.voltage_limit
+        current_limit = hvc_current_limit if hvc_current_limit <= self.current_limit else self.current_limit
 
-        voltage_limit_scaled = int(self.voltage_limit * 10) # required format for charger
-        current_limit_scaled = int(self.current_limit * 10)
+        voltage_limit_scaled = int(voltage_limit * 10) # required format for charger
+        current_limit_scaled = int(current_limit * 10)
 
-        if isinstance(chg_tx, can.ModifiableCyclicTaskABC):
-            self.chg_cmd_msg.data[0] = voltage_limit_scaled >> 8 # voltage limit high byte
-            self.chg_cmd_msg.data[1] = voltage_limit_scaled & 0xFF # voltage limit low byte
-            self.chg_cmd_msg.data[2] = current_limit_scaled >> 8 # current limit high byte
-            self.chg_cmd_msg.data[3] = current_limit_scaled & 0xFF # current limit low byte
-            chg_tx.modify_data(self.chg_cmd_msg)
-        else:
-            chg_tx.stop()
-            self.chg_cmd_msg.data[0] = voltage_limit_scaled >> 8
-            self.chg_cmd_msg.data[1] = voltage_limit_scaled & 0xFF
-            self.chg_cmd_msg.data[2] = current_limit_scaled >> 8
-            self.chg_cmd_msg.data[3] = current_limit_scaled & 0xFF
-            chg_tx = self.chg_bus.send_periodic(self.chg_cmd_msg, CHG_CMD_PERIOD)
+        self.chg_cmd_msg.data[0] = voltage_limit_scaled >> 8 # voltage limit high byte
+        self.chg_cmd_msg.data[1] = voltage_limit_scaled & 0xFF # voltage limit low byte
+        self.chg_cmd_msg.data[2] = current_limit_scaled >> 8 # current limit high byte
+        self.chg_cmd_msg.data[3] = current_limit_scaled & 0xFF # current limit low byte
+        self.chg_tx.modify_data(self.chg_cmd_msg)
 
     def _decode_chg_fault(status: int):
         """Decode fault in charger status message."""
@@ -211,7 +191,6 @@ class ChargingController:
         self.hvc_bus.shutdown()
         self.chg_bus.shutdown()
     
-    # print with timestamp
     def _log(self, msg: str):
         """Print message with timestamp and display in GUI."""
         time = datetime.now().time()
@@ -360,13 +339,18 @@ class ChargingController:
                         break
 
                 case State.CHARGING:
-                    # check for balancing message from HVC
-                    if self.hvc_status_msg is not None and self.hvc_status_msg.data[7] == HVC_Status.START_BALANCING.value:
-                        self._log("Balancing message received from HVC")
-                        self._update_chg_ctrl(Chg_Ctrl.NOT_CHARGING)
-                        self._log("Charger control changed to stop charging")
+                    if self.hvc_status_msg is not None:
+                        # update voltage and current limit based on messages from HVC
+                        if self.hvc_status_msg.data[7] == HVC_Status.KEEP_CHARGING.value:
+                            self._set_chg_limits()
                         
-                        self.state = State.CONFIRM_STOPPED
+                        # check for balancing message from HVC
+                        elif self.hvc_status_msg.data[7] == HVC_Status.START_BALANCING.value:
+                            self._log("Balancing message received from HVC")
+                            self._update_chg_ctrl(Chg_Ctrl.NOT_CHARGING)
+                            self._log("Charger control changed to stop charging")
+                            
+                            self.state = State.CONFIRM_STOPPED
 
                 case State.CONFIRM_STOPPED:
                     # check that charger status indicates charging has stopped
