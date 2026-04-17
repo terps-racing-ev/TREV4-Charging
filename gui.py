@@ -1,3 +1,6 @@
+# TODO: add interface selection to support socketcan option
+# TODO: show history of messages
+
 from tkinter import *
 from tkinter.ttk import *
 import threading
@@ -99,8 +102,8 @@ class ChargingGUI:
         Label(frame, text = "Status:").grid(column=0, row=2, padx=5, pady=5, sticky="w")
         Label(frame, text = "Messages:").grid(column=0, row=3, padx=5, pady=5, sticky="w")
 
-        Label(frame, text = self.controller.status).grid(column=1, row=2, padx=5, pady=5, sticky="w")
-        Label(frame, text = self.controller.messages).grid(column=1, row=3, columnspan=7, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.status).grid(column=1, row=2, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.messages).grid(column=1, row=3, columnspan=7, padx=5, pady=5, sticky="w")
 
         self.voltage_limit_entry = Entry(frame, justify="right")
         self.voltage_limit_entry.grid(column=1, row=0, padx=5, pady=5)
@@ -170,16 +173,17 @@ class ChargingGUI:
     def _on_reset(self):
         """Handle reset button click."""
         self.reset_btn.grid_forget()
-        self.start_btn.grid(column=4, row=0, rowspan=2)
-        self.stop_btn.grid(column=6, row=0, rowspan=2)
+        self.start_btn.grid(column=4, row=0, rowspan=2, padx=(30, 10), pady=5)
+        self.stop_btn.grid(column=6, row=0, rowspan=2, padx=10, pady=5)
         
         self.voltage_limit_entry.config(state="normal")
         self.current_limit_entry.config(state="normal")
         self.start_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
+        self.stop.clear()
 
-        self.controller.status = "IDLE"
-        self.controller.messages = ""
+        self.controller.status.set("IDLE")
+        self.controller.messages.set("")
     
     def _run_charging_program(self, stop: Event):
         """Run main charging controller."""
@@ -187,7 +191,13 @@ class ChargingGUI:
     
         self.root.after(0, lambda: self.start_btn.grid_forget())
         self.root.after(0, lambda: self.stop_btn.grid_forget())
-        self.root.after(0, lambda: self.reset_btn.grid(column=4, row=0, rowspan=2))
+        self.root.after(0, lambda: self.reset_btn.grid(column=4, row=0, rowspan=2, padx=(30, 10), pady=5))
+        self.chg_connected = False
+        self.root.after(0, self.chg_connect_btn.config(text="CONNECT", style = "Start.TButton"))
+        self.root.after(0, self.chg_channel_combo.config(state="readonly"))
+        self.hvc_connected = False
+        self.root.after(0, lambda: self.hvc_connect_btn.config(text="CONNECT", style = "Start.TButton"))
+        self.root.after(0, lambda: self.hvc_channel_combo.config(state="readonly"))
     
 def main():
     root = Tk()
