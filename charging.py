@@ -34,7 +34,7 @@ HVC_FILTERS = [
 # interval in seconds that messages must be sent to the charger
 CHG_CMD_PERIOD = 1
 # interval in seconds for heartbeat message to HVC
-HEARTBEAT_PERIOD = 0.5
+HEARTBEAT_PERIOD = 0.1
 # period in seconds for checking for messages
 CYCLE_TIME = 0.01
 # communication timeout in seconds
@@ -68,6 +68,10 @@ class ChargingController:
         self.current_limit = MAX_CURRENT_LIMIT
         self.status = StringVar(value="IDLE")
         self.messages = StringVar(value="")
+        self.chg_ctrl_voltage = StringVar(value="")
+        self.chg_ctrl_current = StringVar(value="")
+        self.chg_status_voltage = StringVar(value="")
+        self.chg_status_current = StringVar(value="")
 
         self.hvc_bus: Optional[can.Bus] = None
         self.chg_bus: Optional[can.Bus] = None
@@ -93,25 +97,27 @@ class ChargingController:
 
     def _can_init(self):
         """Set up RX FIFOs and TX messages to HVC and charger."""
+        # start heartbeat message to HVC, 0 indicates charger not started
+        self.heartbeat_msg = can.Message(arbitration_id=CAN_ID_HEARTBEAT, data=[0], is_extended_id=True)
+        self.heartbeat_tx = self.hvc_bus.send_periodic(self.heartbeat_msg, HEARTBEAT_PERIOD)
+        self._log("Charging heartbeat started")
+
+        # start control messages to charger at 1s interval; current limit set to 0, control set to not charging
+        voltage_limit_scaled = int(self.voltage_limit * 10) # format required by charger
+        voltage_limit_scaled_high_byte = voltage_limit_scaled >> 8
+        voltage_limit_scaled_low_byte = voltage_limit_scaled & 0xFF
+        self.chg_cmd_msg = can.Message(arbitration_id=CAN_ID_CHG_CMD, data=[voltage_limit_scaled_high_byte, voltage_limit_scaled_low_byte, 0, 0, Chg_Ctrl.NOT_CHARGING.value, 0, 0, 0], is_extended_id=True)
+        self.chg_tx = self.chg_bus.send_periodic(self.chg_cmd_msg, CHG_CMD_PERIOD)
+        self.chg_ctrl_voltage.set(f"{self.voltage_limit} V")
+        self.chg_ctrl_current.set("0.0 A")
+        self._log("Charger control messages started")
+
         # instantiate FIFO buffers for RX messages
         self.hvc_rx_fifo = can.BufferedReader()
         self.hvc_notifier = can.Notifier(self.hvc_bus, [self.hvc_rx_fifo])
         self.chg_rx_fifo = can.BufferedReader()
         self.chg_notifier = can.Notifier(self.chg_bus, [self.chg_rx_fifo])
         self._log("RX FIFO buffers started")
-        
-        # start heartbeat message to HVC, 0 indicates charger not started
-        self.heartbeat_msg = can.Message(arbitration_id=CAN_ID_HEARTBEAT, data=[0], is_extended_id=True)
-        self.heartbeat_tx = self.hvc_bus.send_periodic(self.heartbeat_msg, HEARTBEAT_PERIOD)
-        self._log("Charging heartbeat started")
-
-        # start control messages to charger at 1s interval; voltage and current limit set to 0, control set to not charging
-        voltage_limit_scaled = int(self.voltage_limit * 10) # format required by charger
-        voltage_limit_scaled_high_byte = voltage_limit_scaled >> 8
-        voltage_limit_scaled_low_byte = voltage_limit_scaled & 0xFF
-        self.chg_cmd_msg = can.Message(arbitration_id=CAN_ID_CHG_CMD, data=[voltage_limit_scaled_high_byte, voltage_limit_scaled_low_byte, 0, 0, Chg_Ctrl.NOT_CHARGING.value, 0, 0, 0], is_extended_id=True)
-        self.chg_tx = self.chg_bus.send_periodic(self.chg_cmd_msg, CHG_CMD_PERIOD)
-        self._log("Charger control messages started")
     
     def _update_chg_ctrl(self, chg_ctrl: Chg_Ctrl):
         """Set control to charging or not charging in charger command message."""
@@ -135,7 +141,17 @@ class ChargingController:
         self.chg_cmd_msg.data[3] = current_limit_scaled & 0xFF # current limit low byte
         self.chg_tx.modify_data(self.chg_cmd_msg)
 
-    def _decode_chg_fault(status: int):
+        self.chg_ctrl_current.set(f"{current_limit} A")
+
+    def _update_chg_status_limits(self):
+        """Decode voltage and current limits in charger status message and update in GUI."""
+        chg_status_voltage_limit = struct.unpack('>H', self.chg_status_msg.data[0:2])[0] / 10.0
+        chg_status_current_limit = struct.unpack('>H', self.chg_status_msg.data[2:4])[0] / 10.0
+
+        self.chg_status_voltage.set(f"{chg_status_voltage_limit} V")
+        self.chg_status_current.set(f"{chg_status_current_limit} A")
+    
+    def _decode_chg_fault(self, status: int):
         """Decode fault in charger status message."""
         err = ""
 
@@ -171,7 +187,7 @@ class ChargingController:
         formatted_time = time.strftime("%H:%M:%S")
         self.messages.set(f"{msg} ({formatted_time})")
     
-    def start_chg_can(self, channel: str) -> bool:
+    def start_chg_can(self, interface: str, channel: str) -> bool:
         """
         Start charger CAN bus.
         
@@ -179,19 +195,19 @@ class ChargingController:
             True if successful, False otherwise.
         """
         try:
-            self.chg_bus = can.interface.Bus(interface='pcan', channel=channel, bitrate=CHG_BAUD_RATE)
+            self.chg_bus = can.interface.Bus(interface=interface, channel=channel, bitrate=CHG_BAUD_RATE)
             return True
         except Exception:
             return False
 
-    def start_hvc_can(self, channel: str) -> bool:
+    def start_hvc_can(self, interface: str, channel: str) -> bool:
         """Start HVC CAN bus.
         
         Returns:
             True if successful, False otherwise.
         """
         try:
-            self.hvc_bus = can.interface.Bus(interface='pcan', channel=channel, bitrate=HVC_BAUD_RATE, can_filters=HVC_FILTERS)
+            self.hvc_bus = can.interface.Bus(interface=interface, channel=channel, bitrate=HVC_BAUD_RATE, can_filters=HVC_FILTERS)
             return True
         except Exception:
             return False
@@ -261,17 +277,19 @@ class ChargingController:
             self.chg_status_msg = self.chg_rx_fifo.get_message(timeout=0)
 
             if self.chg_status_msg is not None:
+                print(f"Charger status message: {[hex(b) for b in self.chg_status_msg.data]}")
                 self.last_chg_status_timestamp = time.time()
+                self._update_chg_status_limits()
                 # check charger status info for faults
                 if self.chg_status_msg.data[4] != 0: # status byte; 1s indicate faults
                     self._log("Charger fault:" + self._decode_chg_fault(self.chg_status_msg.data[4]))
                     self.state = State.FAULTED
                     break
-                # check for communication timeout
-                elif self.now - self.last_chg_status_timestamp > TIMEOUT:
-                    self._log("Charger communication timeout")
-                    self.state = State.FAULTED
-                    break
+            # check for communication timeout
+            elif self.now - self.last_chg_status_timestamp > TIMEOUT:
+                self._log("Charger communication timeout")
+                self.state = State.FAULTED
+                break
 
             match self.state:
                 case State.PRECHARGING:
@@ -302,8 +320,8 @@ class ChargingController:
                             self._update_chg_ctrl(Chg_Ctrl.NOT_CHARGING)
                             self._log("Charger control changed to stop charging")
 
-                        self.state = State.BALANCING
-                        self.status.set("BALANCING")
+                            self.state = State.BALANCING
+                            self.status.set("BALANCING")
 
                 case State.BALANCING:
                     if self.hvc_rx_msg is not None and self.hvc_rx_msg.arbitration_id == CAN_ID_HVC_STATE:
