@@ -31,6 +31,9 @@ HVC_FILTERS = [
     {"can_id": CAN_ID_CURR_LIMIT, "can_mask": 0xFFFFFFFF, "extended": True},
 ]
 
+# filter for charger status message
+CHG_FILTER = [{"can_id": CAN_ID_CHG_STATUS, "can_mask": 0xFFFFFFFF, "extended": True}]
+
 # interval in seconds that messages must be sent to the charger
 CHG_CMD_PERIOD = 1
 # interval in seconds for heartbeat message to HVC
@@ -114,9 +117,18 @@ class ChargingController:
 
         # instantiate FIFO buffers for RX messages
         self.hvc_rx_fifo = can.BufferedReader()
-        self.hvc_notifier = can.Notifier(self.hvc_bus, [self.hvc_rx_fifo])
+        self.hvc_notifier = can.Notifier(self.hvc_bus, [self.hvc_rx_fifo]) 
         self.chg_rx_fifo = can.BufferedReader()
         self.chg_notifier = can.Notifier(self.chg_bus, [self.chg_rx_fifo])
+        
+        time.sleep(2) # buffers are flooded with old messages in this time
+        
+        # flush buffers before moving on to main program
+        while self.hvc_rx_fifo.get_message(timeout=0) is not None:
+            pass
+        while self.chg_rx_fifo.get_message(timeout=0) is not None:
+            pass
+
         self._log("RX FIFO buffers started")
     
     def _update_chg_ctrl(self, chg_ctrl: Chg_Ctrl):
@@ -195,7 +207,7 @@ class ChargingController:
             True if successful, False otherwise.
         """
         try:
-            self.chg_bus = can.interface.Bus(interface=interface, channel=channel, bitrate=CHG_BAUD_RATE)
+            self.chg_bus = can.interface.Bus(interface=interface, channel=channel, bitrate=CHG_BAUD_RATE, can_filters=CHG_FILTER)
             return True
         except Exception:
             return False
@@ -277,7 +289,7 @@ class ChargingController:
             self.chg_status_msg = self.chg_rx_fifo.get_message(timeout=0)
 
             if self.chg_status_msg is not None:
-                print(f"Charger status message: {[hex(b) for b in self.chg_status_msg.data]}")
+                print(self.chg_status_msg)
                 self.last_chg_status_timestamp = time.time()
                 self._update_chg_status_limits()
                 # check charger status info for faults

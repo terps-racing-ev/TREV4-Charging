@@ -7,7 +7,7 @@ from charging import ChargingController
 import can
 
 WINDOW_WIDTH = 550
-WINDOW_HEIGHT = 450
+WINDOW_HEIGHT = 475
 
 class ChargingGUI:
     def __init__(self, root: Tk):
@@ -114,30 +114,28 @@ class ChargingGUI:
         frame.grid(row=row, column=0, sticky="we", pady=(0, 10))
 
         Label(frame, text = "Voltage Limit:").grid(column=0, row=0, padx=5, pady=5, sticky="w")
-        Label(frame, text = "Current Limit:").grid(column=0, row=1, padx=5, pady=5, sticky="w")
-
+        self.voltage_limit_entry = Entry(frame, justify="right", width=15)
+        self.voltage_limit_entry.grid(column=1, row=0, columnspan=2, padx=5, pady=5)
         Label(frame, text = "V").grid(column=3, row=0, padx=2, pady=5)
+
+        Label(frame, text = "Current Limit:").grid(column=0, row=1, padx=5, pady=5, sticky="w")
+        self.current_limit_entry = Entry(frame, justify="right", width=15)
+        self.current_limit_entry.grid(column=1, row=1, columnspan=2, padx=5, pady=5)
         Label(frame, text = "A").grid(column=3, row=1, padx=2, pady=5)
 
         Label(frame, text = "Status:").grid(column=0, row=2, padx=5, pady=5, sticky="w")
-        Label(frame, text = "Messages:").grid(column=0, row=5, padx=5, pady=5, sticky="w")
-
         Label(frame, textvariable = self.controller.status).grid(column=1, row=2, columnspan=2, padx=5, pady=5, sticky="w")
-        Label(frame, textvariable = self.controller.messages).grid(column=1, row=5, columnspan=7, padx=5, pady=5, sticky="w")
 
         Label(frame, text = "Charger Control:").grid(column=0, row=3, padx=5, pady=5, sticky="w")
-        Label(frame, text = "Charger Status:").grid(column=0, row=4, padx=5, pady=5, sticky="w")
-
         Label(frame, textvariable = self.controller.chg_ctrl_voltage).grid(column=1, row=3, padx=5, pady=5, sticky="w")
         Label(frame, textvariable = self.controller.chg_ctrl_current).grid(column=2, row=3, padx=5, pady=5, sticky="e")
+        
+        Label(frame, text = "Charger Status:").grid(column=0, row=4, padx=5, pady=5, sticky="w")
         Label(frame, textvariable = self.controller.chg_status_voltage).grid(column=1, row=4, padx=5, pady=5, sticky="w")
         Label(frame, textvariable = self.controller.chg_status_current).grid(column=2, row=4, padx=5, pady=5, sticky="e")
 
-        self.voltage_limit_entry = Entry(frame, justify="right", width=15)
-        self.voltage_limit_entry.grid(column=1, row=0, columnspan=2, padx=5, pady=5)
-        
-        self.current_limit_entry = Entry(frame, justify="right", width=15)
-        self.current_limit_entry.grid(column=1, row=1, columnspan=2, padx=5, pady=5)
+        Label(frame, text = "Messages:").grid(column=0, row=5, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.messages).grid(column=1, row=5, columnspan=7, padx=5, pady=5, sticky="w")
 
         self.start_btn = Button(frame, text = "START", style = "Start.TButton", command=self._on_start)
         self.start_btn.grid(column=5, row=0, rowspan=2, padx=(30, 10), pady=5)
