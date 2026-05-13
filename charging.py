@@ -19,7 +19,7 @@ CHG_BAUD_RATE = 250000
 CAN_ID_HEARTBEAT = 0x004001F9
 CAN_ID_CHG_CMD = 0x1806E5F4 # from charger datasheet
 # RX CAN IDs
-CAN_ID_IO_SUMMARY = 0x004001F0 # bit 0 of byte 0 is SDC (0 for open, 1 for closed)
+CAN_ID_IO_SUMMARY = 0x004001F0 # bit 0 of byte 0 is SDC (0 for closed, 1 for open)
 CAN_ID_HVC_STATE = 0x004001F1
 CAN_ID_CURR_LIMIT = 0x004001F8
 CAN_ID_CHG_STATUS = 0x18FF50E5 # from charger datasheet
@@ -69,12 +69,6 @@ class ChargingController:
     def __init__(self):
         self.voltage_limit = MAX_VOLTAGE_LIMIT
         self.current_limit = MAX_CURRENT_LIMIT
-        self.status = StringVar(value="IDLE")
-        self.messages = StringVar(value="")
-        self.chg_ctrl_voltage = StringVar(value="")
-        self.chg_ctrl_current = StringVar(value="")
-        self.chg_status_voltage = StringVar(value="")
-        self.chg_status_current = StringVar(value="")
 
         self.hvc_bus: Optional[can.Bus] = None
         self.chg_bus: Optional[can.Bus] = None
@@ -97,6 +91,16 @@ class ChargingController:
 
         self.now = 0.0
         self.last_chg_status_timestamp = 0.0
+
+        self.status = StringVar(value="IDLE")
+        self.chg_ctrl_voltage = StringVar(value="")
+        self.chg_ctrl_current = StringVar(value="")
+        self.chg_status_voltage = StringVar(value="")
+        self.chg_status_current = StringVar(value="")
+        self.msg1 = StringVar(value="")
+        self.msg2 = StringVar(value="")
+        self.msg3 = StringVar(value="")
+        self.msg4 = StringVar(value="")
 
     def _can_init(self):
         """Set up RX FIFOs and TX messages to HVC and charger."""
@@ -168,17 +172,17 @@ class ChargingController:
         err = ""
 
         if status & 0b1 == 1:
-            err = err + "\n\t\t\t\tHardware failure"
+            err += "\n\t\tHardware failure"
         if status >> 1 & 0b1 == 1:
-            err = err + "\n\t\t\t\tOvertemperature protection"
+            err += "\n\t\tOvertemperature protection"
         if status >> 2 & 0b1 == 1:
-            err = err + "\n\t\t\t\tInput voltage is wrong"
+            err += "\n\t\tInput voltage is wrong"
         if status >> 3 & 0b1 == 1:
-            err = err + "\n\t\t\t\tBattery is not connected properly"
+            err += "\n\t\tBattery is not connected properly"
         if status >> 4 & 0b1 == 1:
-            err = err + "\n\t\t\t\tCommunication timeout"
+            err += "\n\t\tCommunication timeout"
 
-        return err
+        return err[2:]
     
     def _cleanup(self):
         """Clean up resources at end of program."""
@@ -194,10 +198,16 @@ class ChargingController:
     def _log(self, msg: str):
         """Print message with timestamp and display in GUI."""
         time = datetime.now().time()
-        print(f"{time}\t\t{msg}")
+        print(f"{time}\t{msg}")
 
         formatted_time = time.strftime("%H:%M:%S")
-        self.messages.set(f"{msg} ({formatted_time})")
+        self._update_messages(f"{msg} ({formatted_time})")
+    
+    def _update_messages(self, msg: str):
+        self.msg4.set(self.msg3.get())
+        self.msg3.set(self.msg2.get())
+        self.msg2.set(self.msg1.get())
+        self.msg1.set(msg)
     
     def start_chg_can(self, interface: str, channel: str) -> bool:
         """
@@ -263,7 +273,7 @@ class ChargingController:
 
             if self.hvc_rx_msg is not None:
                 # check if SDC has opened
-                if self.hvc_rx_msg.arbitration_id == CAN_ID_IO_SUMMARY and self.hvc_rx_msg.data[0] & 0x01 == 0:
+                if self.hvc_rx_msg.arbitration_id == CAN_ID_IO_SUMMARY and self.hvc_rx_msg.data[0] & 0x01 == 1:
                     self._log("Shutdown circuit opened")
                     self._update_chg_ctrl(Chg_Ctrl.NOT_CHARGING)
                     self._log("Charger set to not charging")

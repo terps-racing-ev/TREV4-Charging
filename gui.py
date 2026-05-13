@@ -1,5 +1,3 @@
-# TODO: show history of messages
-
 from tkinter import *
 from tkinter.ttk import *
 import threading
@@ -7,7 +5,7 @@ from charging import ChargingController
 import can
 
 WINDOW_WIDTH = 550
-WINDOW_HEIGHT = 475
+WINDOW_HEIGHT = 550
 
 class ChargingGUI:
     def __init__(self, root: Tk):
@@ -135,7 +133,10 @@ class ChargingGUI:
         Label(frame, textvariable = self.controller.chg_status_current).grid(column=2, row=4, padx=5, pady=5, sticky="e")
 
         Label(frame, text = "Messages:").grid(column=0, row=5, padx=5, pady=5, sticky="w")
-        Label(frame, textvariable = self.controller.messages).grid(column=1, row=5, columnspan=7, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.msg1).grid(column=1, row=5, columnspan=7, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.msg2).grid(column=1, row=6, columnspan=7, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.msg3).grid(column=1, row=7, columnspan=7, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.msg4).grid(column=1, row=8, columnspan=7, padx=5, pady=5, sticky="w")
 
         self.start_btn = Button(frame, text = "START", style = "Start.TButton", command=self._on_start)
         self.start_btn.grid(column=5, row=0, rowspan=2, padx=(30, 10), pady=5)
@@ -215,11 +216,14 @@ class ChargingGUI:
         self.stop.clear()
 
         self.controller.status.set("IDLE")
-        self.controller.messages.set("")
         self.controller.chg_ctrl_voltage.set("")
         self.controller.chg_ctrl_current.set("")
         self.controller.chg_status_voltage.set("")
         self.controller.chg_status_current.set("")
+        self.controller.msg1.set("")
+        self.controller.msg2.set("")
+        self.controller.msg3.set("")
+        self.controller.msg4.set("")
     
     def _run_charging_program(self, stop: Event):
         """Run main charging controller."""
