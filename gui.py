@@ -1,4 +1,5 @@
 from tkinter import *
+from tkinter import messagebox
 from tkinter.ttk import *
 import threading
 from charging import ChargingController
@@ -28,6 +29,22 @@ class ChargingGUI:
 
         self._configure_styles()
         self._create_widgets()
+
+    def _selected_endpoint(self, interface: str, channel: str):
+        return (interface.strip(), channel.strip())
+
+    def _endpoint_in_use(self, interface: str, channel: str, connection: str) -> bool:
+        endpoint = self._selected_endpoint(interface, channel)
+
+        if connection == "chg" and self.hvc_connected:
+            return endpoint == self._selected_endpoint(self.hvc_interface_var.get(), self.hvc_channel_var.get())
+        if connection == "hvc" and self.chg_connected:
+            return endpoint == self._selected_endpoint(self.chg_interface_var.get(), self.chg_channel_var.get())
+
+        return False
+
+    def _show_controller_issue(self, title: str, fallback: str):
+        messagebox.showerror(title, self.controller.issue.get() or fallback)
     
     def _detect_available_interfaces(self):
         try:
@@ -124,19 +141,22 @@ class ChargingGUI:
         Label(frame, text = "Status:").grid(column=0, row=2, padx=5, pady=5, sticky="w")
         Label(frame, textvariable = self.controller.status).grid(column=1, row=2, columnspan=2, padx=5, pady=5, sticky="w")
 
-        Label(frame, text = "Charger Control:").grid(column=0, row=3, padx=5, pady=5, sticky="w")
-        Label(frame, textvariable = self.controller.chg_ctrl_voltage).grid(column=1, row=3, padx=5, pady=5, sticky="w")
-        Label(frame, textvariable = self.controller.chg_ctrl_current).grid(column=2, row=3, padx=5, pady=5, sticky="e")
-        
-        Label(frame, text = "Charger Status:").grid(column=0, row=4, padx=5, pady=5, sticky="w")
-        Label(frame, textvariable = self.controller.chg_status_voltage).grid(column=1, row=4, padx=5, pady=5, sticky="w")
-        Label(frame, textvariable = self.controller.chg_status_current).grid(column=2, row=4, padx=5, pady=5, sticky="e")
+        Label(frame, text = "Issue:").grid(column=0, row=3, padx=5, pady=5, sticky="nw")
+        Label(frame, textvariable = self.controller.issue, wraplength=320, justify="left").grid(column=1, row=3, columnspan=4, padx=5, pady=5, sticky="w")
 
-        Label(frame, text = "Messages:").grid(column=0, row=5, padx=5, pady=5, sticky="w")
-        Label(frame, textvariable = self.controller.msg1).grid(column=1, row=5, columnspan=7, padx=5, pady=5, sticky="w")
-        Label(frame, textvariable = self.controller.msg2).grid(column=1, row=6, columnspan=7, padx=5, pady=5, sticky="w")
-        Label(frame, textvariable = self.controller.msg3).grid(column=1, row=7, columnspan=7, padx=5, pady=5, sticky="w")
-        Label(frame, textvariable = self.controller.msg4).grid(column=1, row=8, columnspan=7, padx=5, pady=5, sticky="w")
+        Label(frame, text = "Charger Control:").grid(column=0, row=4, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.chg_ctrl_voltage).grid(column=1, row=4, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.chg_ctrl_current).grid(column=2, row=4, padx=5, pady=5, sticky="e")
+        
+        Label(frame, text = "Charger Status:").grid(column=0, row=5, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.chg_status_voltage).grid(column=1, row=5, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.chg_status_current).grid(column=2, row=5, padx=5, pady=5, sticky="e")
+
+        Label(frame, text = "Messages:").grid(column=0, row=6, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.msg1).grid(column=1, row=6, columnspan=7, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.msg2).grid(column=1, row=7, columnspan=7, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.msg3).grid(column=1, row=8, columnspan=7, padx=5, pady=5, sticky="w")
+        Label(frame, textvariable = self.controller.msg4).grid(column=1, row=9, columnspan=7, padx=5, pady=5, sticky="w")
 
         self.start_btn = Button(frame, text = "START", style = "Start.TButton", command=self._on_start)
         self.start_btn.grid(column=5, row=0, rowspan=2, padx=(30, 10), pady=5)
@@ -151,48 +171,79 @@ class ChargingGUI:
         if not self.chg_connected:
             interface = self.chg_interface_combo.get()
             channel = self.chg_channel_var.get()
+            if not interface or not channel:
+                messagebox.showerror("Connection Error", "Select a charger CAN interface and channel.")
+                return
+            if self._endpoint_in_use(interface, channel, "chg"):
+                messagebox.showerror("Connection Error", "Charger and HVC cannot use the same CAN interface/channel.")
+                return
             if self.controller.start_chg_can(interface=interface, channel=channel):
                 self.chg_connected = True
                 self.chg_connect_btn.config(text="DISCONNECT", style = "Stop.TButton")
                 self.chg_interface_combo.config(state="disabled")
                 self.chg_channel_combo.config(state="disabled")
+            else:
+                self._show_controller_issue("Connection Error", "Failed to connect to charger CAN bus.")
         elif self.chg_connected:
             if self.controller.stop_chg_can():
                 self.chg_connected = False
                 self.chg_connect_btn.config(text="CONNECT", style = "Start.TButton")
                 self.chg_interface_combo.config(state="readonly")
                 self.chg_channel_combo.config(state="readonly")
+            else:
+                self._show_controller_issue("Connection Error", "Failed to disconnect charger CAN bus.")
         
     def _on_hvc_connect(self):
         """Handle HVC connect/disconnect button click."""
         if not self.hvc_connected:
             interface = self.hvc_interface_combo.get()
             channel = self.hvc_channel_var.get()
+            if not interface or not channel:
+                messagebox.showerror("Connection Error", "Select an HVC CAN interface and channel.")
+                return
+            if self._endpoint_in_use(interface, channel, "hvc"):
+                messagebox.showerror("Connection Error", "Charger and HVC cannot use the same CAN interface/channel.")
+                return
             if self.controller.start_hvc_can(interface=interface, channel=channel):
                 self.hvc_connected = True
                 self.hvc_connect_btn.config(text="DISCONNECT", style = "Stop.TButton")
                 self.hvc_interface_combo.config(state="disabled")
                 self.hvc_channel_combo.config(state="disabled")
+            else:
+                self._show_controller_issue("Connection Error", "Failed to connect to HVC CAN bus.")
         elif self.hvc_connected:
             if self.controller.stop_hvc_can():
                 self.hvc_connected = False
                 self.hvc_connect_btn.config(text="CONNECT", style = "Start.TButton")
                 self.hvc_interface_combo.config(state="readonly")
                 self.hvc_channel_combo.config(state="readonly")
+            else:
+                self._show_controller_issue("Connection Error", "Failed to disconnect HVC CAN bus.")
 
     def _on_start(self):
         """Handle start button click."""
+        if not self.chg_connected or not self.hvc_connected:
+            messagebox.showerror("Connection Error", "Connect both charger and HVC CAN buses before starting.")
+            return
+
+        if self._selected_endpoint(self.chg_interface_var.get(), self.chg_channel_var.get()) == self._selected_endpoint(self.hvc_interface_var.get(), self.hvc_channel_var.get()):
+            messagebox.showerror("Connection Error", "Charger and HVC cannot use the same CAN interface/channel.")
+            return
+
+        voltage_limit_entered = self.voltage_limit_entry.get()
+        current_limit_entered = self.current_limit_entry.get()
+
+        try:
+            voltage_limit = None if not voltage_limit_entered else float(voltage_limit_entered)
+            current_limit = None if not current_limit_entered else float(current_limit_entered)
+        except ValueError:
+            messagebox.showerror("Input Error", "Voltage and current limits must be numeric values.")
+            return
+
         self.voltage_limit_entry.config(state="disabled")
         self.current_limit_entry.config(state="disabled")
         self.start_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
-
-        # returns empty string if no entry
-        voltage_limit_entered = self.voltage_limit_entry.get()
-        current_limit_entered = self.current_limit_entry.get()
-
-        voltage_limit = None if not voltage_limit_entered else float(voltage_limit_entered)
-        current_limit = None if not current_limit_entered else float(current_limit_entered)
 
         # replaces max limits as user limits if not None
         self.controller.record_user_chg_limits(voltage_limit, current_limit)
@@ -220,6 +271,7 @@ class ChargingGUI:
         self.controller.chg_ctrl_current.set("")
         self.controller.chg_status_voltage.set("")
         self.controller.chg_status_current.set("")
+        self.controller.issue.set("")
         self.controller.msg1.set("")
         self.controller.msg2.set("")
         self.controller.msg3.set("")
@@ -228,6 +280,9 @@ class ChargingGUI:
     def _run_charging_program(self, stop: Event):
         """Run main charging controller."""
         self.controller.main(stop)
+
+        if self.controller.status.get() == "FAULTED" and self.controller.issue.get():
+            self.root.after(0, lambda: self._show_controller_issue("Charging Fault", "Charging fault occurred."))
     
         self.root.after(0, lambda: self.start_btn.grid_forget())
         self.root.after(0, lambda: self.stop_btn.grid_forget())
